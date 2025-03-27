@@ -23,7 +23,7 @@ def main(src: Path, dest: Path, keep_temp_dir=False, just_save=False):
     if just_save:
         save_with_openpyxl(wb, src, dest, temp_dir_args)
     else:
-        wb.worksheets[0]['A1'].value = datetime.now()
+        wb.worksheets[0]['B1'].value = datetime.now()
         save_with_drawings(wb, src, dest, temp_dir_args)
 
     wb.close()
@@ -32,7 +32,7 @@ def main(src: Path, dest: Path, keep_temp_dir=False, just_save=False):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog='Insert datetime',
-        description='Excel シートの A1 セルに日時をセットする。')
+        description='Excel シートの B1 セルに日時をセットする。')
     parser.add_argument('src', help='入力となる Excel ブックのファイル名。')
     parser.add_argument('dest', help='出力となる Excel ブックのファイル名。')
     parser.add_argument(
