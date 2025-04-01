@@ -10,6 +10,7 @@ from lxml.etree import Element
 from openpyxl.workbook.workbook import Workbook
 
 main_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
 
 
 def get_rel_max_id(el: Element) -> int:
@@ -36,28 +37,66 @@ def restore_folder(
         return
 
     if delete_first:
-        shutil.rmtree(dest)
+        shutil.rmtree(dest, ignore_errors=True)
 
     if not os.path.exists(dest):
         shutil.copytree(src, dest)
 
 
-def restore_xl_drawings(before_dir: Path, after_dir: Path):
-    '''xl/drawings/ フォルダ内の _rels/ フォルダと *.xml ファイルを復元する。
+def restore_comments(before_dir: Path, after_dir: Path):
+    '''コメントの書式を復元する。
     '''
-    src = before_dir / 'xl/drawings/'
-    dest = after_dir / 'xl/drawings/'
+    # openpyxl が作成した xl/comments/comment*.xml を削除する。
+    shutil.rmtree(after_dir / 'xl/comments', ignore_errors=True)
 
-    if not src.exists():
-        return
+    # 保存前の xl/comments*.xml を復元する。
+    target_ptn = re.compile(r'comments[0-9]+.xml')
+    for f in (before_dir / 'xl').iterdir():
+        if target_ptn.fullmatch(f.name):
+            shutil.copy2(f, after_dir / 'xl')
 
-    for f in src.iterdir():
-        if f.name == '_rels':
-            # _rels/ フォルダ内には drawing*.xml のリレーションしかないので、
-            # openpyxl が *.vml を書き換えていたとしても、丸ごと上書きで OK。
-            shutil.copytree(f, dest / '_rels')
-        elif f.suffix == '.xml':
-            shutil.copy2(f, dest)
+    # openpyxl が作成した xl/drawings/commentsDrawing*.vml を削除する。
+    '''
+    target_ptn = re.compile(r'commentsDrawing[0-9]+.vml')
+    for f in (after_dir / 'xl/drawings').iterdir():
+        if target_ptn.fullmatch(f.name):
+            os.remove(f)
+    '''
+
+    # xl/worksheets/_rels/sheet*.xml.rels 内のコメント関連のタグを復元する。
+    '''
+    src = before_dir / 'xl/worksheets/_rels/'
+    dest = after_dir / 'xl/worksheets/_rels/'
+    for f in dest.iterdir():
+        if not f.name.endswith('.xml.rels'):
+            continue
+
+        # 保存後の xml の root を取得する。
+        after_tree = etree.parse(f)
+        after_root = after_tree.getroot()
+
+        # openpyxl によって追加されたコメントのリレーションを削除する。
+        relationships = after_root.findall(f'{{{rel_ns}}}Relationship')
+        for rel in relationships:
+            if rel.get("Target", "").startswith("/xl/comments/comment"):
+                after_root.remove(rel)
+
+        # 保存前の xml の root を取得する。
+        before_tree = etree.parse(src / f.name)
+        before_root = before_tree.getroot()
+
+        # 保存前の xml からコメントのリレーションをコピーする。
+        max_id = get_rel_max_id(after_root)
+        for rel in before_root.findall(f'{{{rel_ns}}}Relationship'):
+            if rel.get("Target", "").startswith("../comments"):
+                max_id += 1
+                rel.set("Id", f'rId{max_id}')
+                after_root.append(rel)
+
+        # 保存する。
+        after_tree = etree.ElementTree(after_root)
+        after_tree.write(f, encoding='utf-8')
+    '''
 
 
 def add_ns(root: Element, key: str, ns: str) -> Element:
@@ -75,9 +114,6 @@ def add_ns(root: Element, key: str, ns: str) -> Element:
 def restor_xl_worksheets(before_dir: Path, after_dir: Path):
     '''xl/worksheets/ フォルダ内の _rels/ フォルダと *.xml ファイルを復元する。
     '''
-    # Target="../drawings/drawing*.xml" を探すための正規表現パターン。
-    target_ptn = re.compile(r'\.\./drawings/drawing[0-9]+.xml')
-
     src = before_dir / 'xl/worksheets/'
     dest = after_dir / 'xl/worksheets/'
 
@@ -89,55 +125,81 @@ def restor_xl_worksheets(before_dir: Path, after_dir: Path):
         if not f.name.endswith('.xml.rels'):
             continue
 
-        # 保存前の xml の root を取得する。
+        # 保存前の .xml.rels の root を取得する。
         before_tree = etree.parse(f)
         before_root = before_tree.getroot()
 
-        # Target="../drawings/drawing*.xml" の Relationship を取得する。
+        # 以下の Relationship を取得する。
+        # Target="../comments*.xml"
+        # Target="../drawings/vmlDrawing*.vml"
+        # Target="../drawings/drawing*.xml"
         namespaces = {'ns': before_root.nsmap[None]}
         rels = before_root.xpath('ns:Relationship', namespaces=namespaces)
-        existings = []
+        keep_comments = []
+        keep_vmls = []
+        keep_drawings = []
         for rel in rels:
-            target = rel.get('Target')
-            if target and target_ptn.fullmatch(target):
-                existings.append(rel)
+            target: str = rel.get('Target')
+            if not target:
+                continue
+            if target.startswith('../comments'):
+                keep_comments.append(rel)
+            elif target.startswith('../drawings/vmlDrawing'):
+                keep_vmls.append(rel)
+            elif target.startswith('../drawings/drawing'):
+                keep_drawings.append(rel)
 
-        if not existings:
-            continue
-
-        # 保存後の xml の root を取得または作成する。
+        # 保存後の .xml.rels の root を取得または作成する。
         after_path = dest_rels / f.name
         if after_path.exists():
             after_tree = etree.parse(after_path)
             after_root = after_tree.getroot()
+        elif not (keep_comments or keep_vmls or keep_drawings):
+            # 保存後のファイルもなく復元するものも無ければ、次のファイルへ。
+            continue
         else:
-            namespace = \
-                "http://schemas.openxmlformats.org/package/2006/relationships"
-            after_root = etree.Element("Relationships", xmlns=namespace)
+            after_root = etree.Element("Relationships", xmlns=rel_ns)
 
-        # sheet*.xml.rels に対応する sheet*.xml ファイル。
-        xml_path = dest / f.name[:-5]
+        # 保存後の .xml.rels から openpyxl が追加した以下の Relationsip を削除。
+        # Target="/xl/comments/comment*.xml"
+        # Target="/xl/drawings/commentsDrawing*.vml"
+        namespaces = {'ns': after_root.nsmap[None]}
+        rels = after_root.xpath('ns:Relationship', namespaces=namespaces)
+        for rel in rels:
+            target: str = rel.get('Target')
+            if not target:
+                continue
+            if target.startswith('/xl/comments/comment'):
+                after_root.remove(rel)
+            elif target.startswith('/xl/drawings/commentsDrawing'):
+                after_root.remove(rel)
+
+        # sheet*.xml.rels に対応する sheet*.xml ファイルの root を準備する。
+        xml_path = dest / f.name[:-5]  # .rels を削ったファイル名
         xml_tree = etree.parse(xml_path)
         xml_root = xml_tree.getroot()
-        rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/"\
+        # namespace がなければ追加しておく。
+        ns = "http://schemas.openxmlformats.org/officeDocument/2006/"\
             "relationships"
-        xml_root = add_ns(xml_root, 'r', rel_ns)
+        xml_root = add_ns(xml_root, 'r', ns)
 
-        # sheet*.xml ファイルに drawing を足す場合の場所を求めておく。
+        # sheet*.xml ファイルに Relationship を足す場合の場所を求めておく。
         # legacyDrawing 要素よりも前に挿入する必要があるらしい。
         legacy = xml_root.find(f'.//{{{main_ns}}}legacyDrawing')
         drw_index = xml_root.index(legacy) if legacy is not None else -1
 
         # 保存後の xml の root に復元した Relationship を足していく。
+        # TODO: keep_comments, keep_vmls についてもやる。
+        # TODO: 先に legacyDrawing を削除するのが良いかも。
         max_id = get_rel_max_id(after_root)
-        for rel in existings:
+        for rel in keep_drawings:
             max_id += 1
             rel.set('Id', f'rId{max_id}')
             after_root.append(rel)
 
             # 対応する drawing 要素を sheet*.xml に足す。
             drw = etree.Element('drawing')
-            drw.set(f'{{{rel_ns}}}id', f'rId{max_id}')
+            drw.set(f'{{{ns}}}id', f'rId{max_id}')
             if drw_index >= 0:
                 xml_root.insert(drw_index, drw)
                 drw_index += 1
@@ -163,6 +225,48 @@ diagram_ctype_map = {
     'drawing': "application/vnd.ms-office.drawingml.diagramDrawing+xml",
 }
 drawing_ctype = 'application/vnd.openxmlformats-officedocument.drawing+xml'
+
+
+def restore_ext_lst(before_dir: Path, after_dir: Path):
+    '''xl/worksheets/*.xml ファイル内の <extLst> を復元する。
+    '''
+    src = before_dir / 'xl/worksheets/'
+    dest = after_dir / 'xl/worksheets/'
+
+    # 保存前の worksheets/ フォルダ内の *.xml ファイルについて処理する。
+    for f in src.iterdir():
+        if not f.name.endswith('.xml'):
+            continue
+
+        # 保存前の xml の root を取得する。
+        before_tree = etree.parse(f)
+        before_root = before_tree.getroot()
+
+        # 保存前の xml から <extLst> を取得する。
+        extLsts = before_root.findall(f".//{{{main_ns}}}extLst")
+        if not extLsts:
+            continue
+
+        # 保存後の xml の root を取得する。
+        after_tree = etree.parse(dest / f.name)
+        after_root = after_tree.getroot()
+
+        # すべての <extLst> を復元
+        for extLst in extLsts:
+            parent = extLst.getparent()
+            parent_tag = parent.tag.split('}')[-1]
+
+            # 保存前と同じ親を探し、その下に復元する。
+            after_parent = after_root.find(f".//{{{main_ns}}}{parent_tag}")
+            if after_parent:
+                after_parent.append(extLst)
+            else:
+                # 同じ親がなければ root 直下に復元する。
+                after_root.append(extLst)
+
+        # 保存する。
+        after_tree = etree.ElementTree(after_root)
+        after_tree.write(dest / f.name, encoding='utf-8')
 
 
 def adjust_content_types(after_dir: Path):
@@ -228,48 +332,6 @@ def adjust_content_types(after_dir: Path):
     tree.write(file_path, encoding='utf-8')
 
 
-def restore_ext_lst(before_dir: Path, after_dir: Path):
-    '''xl/worksheets/*.xml ファイル内の <extLst> を復元する。
-    '''
-    src = before_dir / 'xl/worksheets/'
-    dest = after_dir / 'xl/worksheets/'
-
-    # 保存前の worksheets/ フォルダ内の *.xml ファイルについて処理する。
-    for f in src.iterdir():
-        if not f.name.endswith('.xml'):
-            continue
-
-        # 保存前の xml の root を取得する。
-        before_tree = etree.parse(f)
-        before_root = before_tree.getroot()
-
-        # 保存前の xml から <extLst> を取得する。
-        extLsts = before_root.findall(f".//{{{main_ns}}}extLst")
-        if not extLsts:
-            continue
-
-        # 保存後の xml の root を取得する。
-        after_tree = etree.parse(dest / f.name)
-        after_root = after_tree.getroot()
-
-        # すべての <extLst> を復元
-        for extLst in extLsts:
-            parent = extLst.getparent()
-            parent_tag = parent.tag.split('}')[-1]
-
-            # 保存前と同じ親を探し、その下に復元する。
-            after_parent = after_root.find(f".//{{{main_ns}}}{parent_tag}")
-            if after_parent:
-                after_parent.append(extLst)
-            else:
-                # 同じ親がなければ root 直下に復元する。
-                after_root.append(extLst)
-
-        # 保存する。
-        after_tree = etree.ElementTree(after_root)
-        after_tree.write(dest / f.name, encoding='utf-8')
-
-
 def save_with_drawings(
         wb: Workbook, src: Path, dest: Path, temp_dir_args=None):
     '''図形や画像を復元しつつ Workbook を保存する。
@@ -304,21 +366,23 @@ def save_with_drawings(
         with zipfile.ZipFile(dest, 'r') as zf:
             zf.extractall(str(after_dir))
 
-        # xl/diagrams/, xl/media/ フォルダを復元する。
+        # xl/diagrams/, xl/media/, xl/drawings/ フォルダを復元する。
         restore_folder(before_dir, after_dir, 'xl/diagrams/')
         restore_folder(before_dir, after_dir, 'xl/media/')
+        restore_folder(
+            before_dir, after_dir, 'xl/drawings/', delete_first=True)
 
-        # xl/drawings/ フォルダ内のコンテンツを復元する。
-        restore_xl_drawings(before_dir, after_dir)
+        # コメントの書式を復元する。
+        restore_comments(before_dir, after_dir)
 
         # xl/worksheets/ フォルダ内のコンテンツを復元する。
         restor_xl_worksheets(before_dir, after_dir)
 
-        # [Content_Types].xml の内容を調整する。
-        adjust_content_types(after_dir)
-
         # 数式を使った「データの入力規則」を復元する。
         restore_ext_lst(before_dir, after_dir)
+
+        # [Content_Types].xml の内容を調整する。
+        adjust_content_types(after_dir)
 
         # dest に圧縮しなおす。
         with zipfile.ZipFile(dest, 'w') as zf:
