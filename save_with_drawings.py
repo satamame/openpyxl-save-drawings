@@ -130,24 +130,24 @@ def restor_xl_worksheets(before_dir: Path, after_dir: Path):
         before_root = before_tree.getroot()
 
         # 以下の Relationship を取得する。
-        # Target="../comments*.xml"
-        # Target="../drawings/vmlDrawing*.vml"
         # Target="../drawings/drawing*.xml"
+        # Target="../drawings/vmlDrawing*.vml"
+        # Target="../comments*.xml"
         namespaces = {'ns': before_root.nsmap[None]}
         rels = before_root.xpath('ns:Relationship', namespaces=namespaces)
-        keep_comments = []
-        keep_vmls = []
         keep_drawings = []
+        keep_vmls = []
+        keep_comments = []
         for rel in rels:
             target: str = rel.get('Target')
             if not target:
                 continue
-            if target.startswith('../comments'):
-                keep_comments.append(rel)
+            if target.startswith('../drawings/drawing'):
+                keep_drawings.append(rel)
             elif target.startswith('../drawings/vmlDrawing'):
                 keep_vmls.append(rel)
-            elif target.startswith('../drawings/drawing'):
-                keep_drawings.append(rel)
+            elif target.startswith('../comments'):
+                keep_comments.append(rel)
 
         # 保存後の .xml.rels の root を取得または作成する。
         after_path = dest_rels / f.name
@@ -158,7 +158,7 @@ def restor_xl_worksheets(before_dir: Path, after_dir: Path):
             # 保存後のファイルもなく復元するものも無ければ、次のファイルへ。
             continue
         else:
-            after_root = etree.Element("Relationships", xmlns=rel_ns)
+            after_root = etree.Element("Relationships", nsmap={None: rel_ns})
 
         # 保存後の .xml.rels から openpyxl が追加した以下の Relationsip を削除。
         # Target="/xl/comments/comment*.xml"
@@ -185,12 +185,15 @@ def restor_xl_worksheets(before_dir: Path, after_dir: Path):
 
         # sheet*.xml ファイルに Relationship を足す場合の場所を求めておく。
         # legacyDrawing 要素よりも前に挿入する必要があるらしい。
-        legacy = xml_root.find(f'.//{{{main_ns}}}legacyDrawing')
-        drw_index = xml_root.index(legacy) if legacy is not None else -1
+        # legacy = xml_root.find(f'.//{{{main_ns}}}legacyDrawing')
+        # drw_index = xml_root.index(legacy) if legacy is not None else -1
 
-        # 保存後の xml の root に復元した Relationship を足していく。
-        # TODO: keep_comments, keep_vmls についてもやる。
-        # TODO: 先に legacyDrawing を削除するのが良いかも。
+        # 先に保存後の sheet*.xml から legacyDrawing を削除しておく。
+        legacy_drws = xml_root.findall(f'.//{{{main_ns}}}legacyDrawing')
+        for legacy_drw in legacy_drws:
+            xml_root.remove(legacy_drw)
+
+        # 保存後の .xml.rels の root に復元した Relationship を足していく。
         max_id = get_rel_max_id(after_root)
         for rel in keep_drawings:
             max_id += 1
@@ -200,11 +203,24 @@ def restor_xl_worksheets(before_dir: Path, after_dir: Path):
             # 対応する drawing 要素を sheet*.xml に足す。
             drw = etree.Element('drawing')
             drw.set(f'{{{ns}}}id', f'rId{max_id}')
-            if drw_index >= 0:
-                xml_root.insert(drw_index, drw)
-                drw_index += 1
-            else:
-                xml_root.append(drw)
+            xml_root.append(drw)
+
+        for rel in keep_vmls:
+            max_id += 1
+            rel.set('Id', f'rId{max_id}')
+            after_root.append(rel)
+
+            # 対応する legacyDrawing 要素を sheet*.xml に足す。
+            ldrw = etree.Element('legacyDrawing')
+            ldrw.set(f'{{{ns}}}id', f'rId{max_id}')
+            xml_root.append(ldrw)
+
+        for rel in keep_comments:
+            max_id += 1
+            rel.set('Id', f'rId{max_id}')
+            after_root.append(rel)
+
+            # comments は sheet*.xml に足さなくて良い。
 
         # sheet*.xml を保存する。
         xml_tree = etree.ElementTree(xml_root)
@@ -272,6 +288,8 @@ def restore_ext_lst(before_dir: Path, after_dir: Path):
 def adjust_content_types(after_dir: Path):
     '''[Content_Types].xml の内容を調整する。
     '''
+    # TODO: comments を正しく復元する。
+
     file_path = after_dir / '[Content_Types].xml'
     tree = etree.parse(file_path)
     root = tree.getroot()
