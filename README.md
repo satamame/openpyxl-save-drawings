@@ -42,7 +42,7 @@ Steps to view the demo on Windows.
 
 ### Save with the solution
 
-1. To open a.xlsx in openpyxl, make changes, save and restore the image:
+1. To open a.xlsx in openpyxl, make changes, save and restore the drawings:
     ```
     (.venv)> python app.py a.xlsx b.xlsx
     ```
