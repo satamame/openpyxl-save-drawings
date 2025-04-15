@@ -18,7 +18,7 @@ This solution restores the following.
 
 *Some items may not be restored.
 
-## Demonstration.
+## Demonstration
 
 Steps to view the demo on Windows.
 
