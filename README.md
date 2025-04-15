@@ -1,4 +1,4 @@
-# Restore drawings in WB saved with opwnpyxl
+# Restore drawings in WB saved with openpyxl
 
 [⇒ 日本語版](https://github.com/satamame/openpyxl-save-drawings/blob/main/README_ja.md)
 
