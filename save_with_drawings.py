@@ -68,7 +68,7 @@ def add_ns(root: Element, key: str, ns: str) -> Element:
     return new_root
 
 
-def restor_xl_worksheets(before_dir: Path, after_dir: Path):
+def restore_xl_worksheets(before_dir: Path, after_dir: Path):
     '''xl/worksheets/ フォルダ内の _rels/ フォルダと *.xml ファイルを復元する。
     '''
     src = before_dir / 'xl/worksheets/'
@@ -367,7 +367,7 @@ def save_with_drawings(
         restore_comments(before_dir, after_dir)
 
         # xl/worksheets/ フォルダ内のコンテンツを復元する。
-        restor_xl_worksheets(before_dir, after_dir)
+        restore_xl_worksheets(before_dir, after_dir)
 
         # 数式を使った「データの入力規則」を復元する。
         restore_ext_lst(before_dir, after_dir)
