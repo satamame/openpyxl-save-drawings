@@ -140,10 +140,8 @@ def restore_xl_worksheets(before_dir: Path, after_dir: Path):
             "relationships"
         xml_root = add_ns(xml_root, 'r', ns)
 
-        # sheet*.xml ファイルに Relationship を足す場合の場所を求めておく。
-        # legacyDrawing 要素よりも前に挿入する必要があるらしい。
-        # legacy = xml_root.find(f'.//{{{main_ns}}}legacyDrawing')
-        # drw_index = xml_root.index(legacy) if legacy is not None else -1
+        # drawing 要素を legacyDrawing 要素よりも前に挿入する必要があるが、
+        # 最初に legacyDrawing を削除するので、自動的にそうなる。
 
         # 先に保存後の sheet*.xml から legacyDrawing を削除しておく。
         legacy_drws = xml_root.findall(f'.//{{{main_ns}}}legacyDrawing')
