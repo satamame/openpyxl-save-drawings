@@ -2,7 +2,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from openpyxl.workbook.workbook import Workbook
+from openpyxl import Workbook
 
 
 def save_with_openpyxl(

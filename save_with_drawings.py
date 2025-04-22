@@ -7,7 +7,7 @@ from pathlib import Path
 
 from lxml import etree
 from lxml.etree import Element
-from openpyxl.workbook.workbook import Workbook
+from openpyxl import Workbook
 
 main_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
