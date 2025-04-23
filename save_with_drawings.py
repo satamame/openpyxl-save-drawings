@@ -33,7 +33,7 @@ def restore_folder(
     src = before_dir / folder2restore
     dest = after_dir / folder2restore
 
-    if not src.exists():
+    if not src.is_dir():
         return
 
     if delete_first:
@@ -268,7 +268,7 @@ def adjust_content_types(after_dir: Path):
     exts = set()
     for folder in ["xl/diagrams/", "xl/media/", "xl/drawings/"]:
         dir_path = after_dir / folder
-        if not dir_path.exists():
+        if not dir_path.is_dir():
             continue
         for file in dir_path.iterdir():
             ext = file.suffix.strip('.')
@@ -290,22 +290,24 @@ def adjust_content_types(after_dir: Path):
 
     # xl/diagrams/ フォルダ内のファイルに対する Override 要素を追加する。
     dir_path = after_dir / 'xl/diagrams'
-    for file in dir_path.iterdir():
-        if file.suffix == ".xml":
-            part_name = f"/xl/diagrams/{file.name}"
-            ctype = diagram_ctype_map[re.sub(r'\d+$', '', file.stem)]
-            override_elem = etree.Element(
-                "Override", PartName=part_name, ContentType=ctype)
-            root.append(override_elem)
+    if dir_path.is_dir():
+        for file in dir_path.iterdir():
+            if file.suffix == ".xml":
+                part_name = f"/xl/diagrams/{file.name}"
+                ctype = diagram_ctype_map[re.sub(r'\d+$', '', file.stem)]
+                override_elem = etree.Element(
+                    "Override", PartName=part_name, ContentType=ctype)
+                root.append(override_elem)
 
     # xl/drawings/ フォルダ内のファイルに対する Override 要素を追加する。
     dir_path = after_dir / 'xl/drawings'
-    for file in dir_path.iterdir():
-        if file.suffix == ".xml":
-            part_name = f"/xl/drawings/{file.name}"
-            override_elem = etree.Element(
-                "Override", PartName=part_name, ContentType=drawing_ctype)
-            root.append(override_elem)
+    if dir_path.is_dir():
+        for file in dir_path.iterdir():
+            if file.suffix == ".xml":
+                part_name = f"/xl/drawings/{file.name}"
+                override_elem = etree.Element(
+                    "Override", PartName=part_name, ContentType=drawing_ctype)
+                root.append(override_elem)
 
     # xl/ フォルダ内の comments*.xml ファイルに対する Override 要素を追加する。
     dir_path = after_dir / 'xl'
