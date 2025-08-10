@@ -3,6 +3,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 from lxml import etree
@@ -62,9 +63,15 @@ def add_ns(root: Element, key: str, ns: str) -> Element:
     nsmap = root.nsmap.copy() if root.nsmap else {}
     nsmap[key] = ns
 
-    # 新しい root を作成し直す（既存の要素を移植）
+    # 新しい root を作成し直す
     new_root = etree.Element(root.tag, nsmap=nsmap)
-    new_root.extend(root)
+
+    # 子要素と属性をコピー
+    for child in root:
+        new_root.append(deepcopy(child))
+    for attr, value in root.attrib.items():
+        new_root.set(attr, value)
+
     return new_root
 
 
